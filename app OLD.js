@@ -62,32 +62,15 @@ document.addEventListener('DOMContentLoaded', () => {
             invoicesTableBody.innerHTML = ''; 
             invoices.forEach(invoice => {
                 const row = invoicesTableBody.insertRow();
-                const badgeColor = invoice.Estado === 'ACTIVA' ? 'bg-success' : 'bg-danger';
-
                 row.innerHTML = `
                     <td>${invoice.FacturaID}</td>
                     <td>${invoice.NumeroFactura}</td>
-                    <td>${invoice.Fecha ? invoice.Fecha.split('T')[0] : 'N/A'}</td>
+                    <td>${invoice.Fecha.split('T')[0]}</td>
                     <td>${invoice.ClienteNombre}</td>
                     <td>$${invoice.Total.toFixed(2)}</td>
-                    <td><span class="badge ${badgeColor}">${invoice.Estado}</span></td>
-                    <td>
-                        <div class="btn-group" role="group">
-                            <button class="btn btn-info btn-sm view-details" data-id="${invoice.FacturaID}" title="Ver Detalle">
-                                <i class="fas fa-eye"></i>
-                            </button>
-                            <button class="btn btn-warning btn-sm edit-invoice" data-id="${invoice.FacturaID}" title="Editar" 
-                                ${invoice.Estado === 'ANULADA' ? 'disabled' : ''}>
-                                <i class="fas fa-edit"></i>
-                            </button>
-                            <button class="btn btn-danger btn-sm cancel-invoice" data-id="${invoice.FacturaID}" title="Anular"
-                                ${invoice.Estado === 'ANULADA' ? 'disabled' : ''}>
-                                <i class="fas fa-ban"></i>
-                            </button>
-                        </div>
-                    </td>
+                    <td><button class="btn btn-info btn-sm view-details" data-invoice-id="${invoice.FacturaID}">Ver Detalles</button></td>
                 `;
-             });
+            });
         } catch (error) { }
     }
 
@@ -128,6 +111,40 @@ document.addEventListener('DOMContentLoaded', () => {
         if (viewId === 'products') loadProducts();
     }
 
+    // --- 3. Invoices Logic (CRUD y Detalles) ---
+
+    // Ver detalle de una factura
+    invoicesTableBody.addEventListener('click', async (event) => {
+        if (event.target.classList.contains('view-details')) {
+            const invoiceId = event.target.dataset.invoiceId;
+            try {
+                const allInvoices = await callApi('/facturas/listar');
+                const invoice = allInvoices.find(inv => inv.FacturaID == invoiceId);
+
+                if (invoice) {
+                    document.getElementById('modal-invoice-id').textContent = invoice.FacturaID;
+                    document.getElementById('modal-invoice-number').textContent = `(${invoice.NumeroFactura})`;
+                    document.getElementById('modal-invoice-date').textContent = invoice.Fecha.split('T')[0];
+                    document.getElementById('modal-invoice-client').textContent = invoice.ClienteNombre;
+                    document.getElementById('modal-invoice-total').textContent = `$${invoice.Total.toFixed(2)}`;
+
+                    const detailsBody = document.getElementById('modal-invoice-details-body');
+                    detailsBody.innerHTML = '';
+                    invoice.Detalles.forEach(detail => {
+                        const row = detailsBody.insertRow();
+                        row.innerHTML = `
+                            <td>${detail.ProductoNombre}</td>
+                            <td>${detail.Cantidad}</td>
+                            <td>$${detail.PrecioUnitario.toFixed(2)}</td>
+                            <td>$${detail.SubtotalLinea.toFixed(2)}</td>
+                        `;
+                    });
+                    invoiceDetailsModal.show();
+                }
+            } catch (error) { }
+        }
+    });
+
     function addProductRow() {
         const newRow = document.createElement('div');
         newRow.classList.add('row', 'mb-2', 'product-item');
@@ -156,18 +173,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('new-invoice-button').addEventListener('click', async () => {
-        document.getElementById('edit-invoice-id').value = '';
         createInvoiceForm.reset();
         productItemsContainer.innerHTML = '';
         try {
             availableProducts = await callApi('/productos/listar');
-
-            const clientes = await callApi('/clientes/listar');
-            const clienteSelect = document.getElementById('cliente-id');
-            clienteSelect.innerHTML = '<option value="">Seleccione un cliente</option>';
-            clientes.forEach(c => {
-            clienteSelect.innerHTML += `<option value="${c.ClienteID}">${c.RazonSocial} (${c.Identificacion})</option>`;
-        });
         } catch (e) { 
             console.warn("Error cargando productos, usando simulados.");
             availableProducts = [{ ProductoID: 1, Nombre: 'Error al cargar', PrecioUnitario: 0 }];
@@ -176,17 +185,12 @@ document.addEventListener('DOMContentLoaded', () => {
         createInvoiceModal.show();
     });
 
-    
     createInvoiceForm.addEventListener('submit', async (event) => {
         event.preventDefault();
-        
-        // 1. Detectar si estamos editando o creando
-        const idParaEditar = document.getElementById('edit-invoice-id').value;
         const clienteId = document.getElementById('cliente-id').value;
         const productItems = document.querySelectorAll('.product-item');
         const detalles = [];
 
-        // 2. Recolectar los datos de las filas
         productItems.forEach(item => {
             const productId = item.querySelector('.product-id').value;
             const quantity = item.querySelector('.quantity').value;
@@ -195,138 +199,20 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        // 3. Validar restricción: No facturas vacías
         if (detalles.length === 0) {
             Swal.fire('Error', 'Debe agregar al menos un producto', 'warning');
             return;
         }
 
-        const payload = { ClienteID: parseInt(clienteId), Detalles: detalles };
-
         try {
-            if (idParaEditar) {
-                // --- MODO ACTUALIZAR (PUT) ---
-                await callApi(`/facturas/actualizar/${idParaEditar}`, 'PUT', payload);
-                Swal.fire('Actualizado', 'Factura modificada y recalculada con éxito', 'success');
-            } else {
-                // --- MODO CREAR (POST) ---
-                await callApi('/facturas/crear', 'POST', payload);
-                Swal.fire('Éxito', 'Factura creada exitosamente!', 'success');
-            }
-            
-            // 4. Limpiar y cerrar
+            await callApi('/facturas/crear', 'POST', { ClienteID: parseInt(clienteId), Detalles: detalles });
+            Swal.fire('Éxito', 'Factura creada exitosamente!', 'success');
             createInvoiceModal.hide();
-            document.getElementById('edit-invoice-id').value = ''; // ¡Muy importante limpiar el ID!
-            loadInvoices(); // Refrescar la tabla principal
-        } catch (error) { 
-            // El error ya lo maneja callApi mostrando el Swal.fire
-        }
-    });
-    
-
-    //Bloque para eventos de factura
-    invoicesTableBody.addEventListener('click', async (e) => {
-        const btnView = e.target.closest('.view-details');
-        const btnEdit = e.target.closest('.edit-invoice');
-        const btnCancel = e.target.closest('.cancel-invoice');
-
-        // A. LÓGICA VER DETALLES
-        if (btnView) {
-            const invoiceId = btnView.getAttribute('data-id');
-            try {
-                const invoice = await callApi(`/facturas/obtener/${invoiceId}`);
-                if (invoice) {
-                    document.getElementById('modal-invoice-id').textContent = invoice.FacturaID;
-                    document.getElementById('modal-invoice-date').textContent = invoice.Fecha.split('T')[0];
-                    document.getElementById('modal-invoice-total').textContent = `$${invoice.Total.toFixed(2)}`;
-                    
-                    document.getElementById('modal-invoice-client').textContent = invoice.ClienteNombre || "Cliente #" + invoice.ClienteID;
-
-                    const detailsBody = document.getElementById('modal-invoice-details-body');
-                    detailsBody.innerHTML = '';
-
-                    invoice.Detalles.forEach(detail => {
-                        const row = detailsBody.insertRow();
-                        row.innerHTML = `
-                            <td>${detail.ProductoNombre || ('Producto ' + detail.ProductoID)}</td>
-                            <td>${detail.Cantidad}</td>
-                            <td>$${(detail.PrecioUnitarioHistorico || 0).toFixed(2)}</td>
-                            <td>$${(detail.SubtotalLinea || 0).toFixed(2)}</td>
-                            <td>$${(detail.IVALinea || 0).toFixed(2)}</td>
-                            <td>$${(detail.TotalLinea || 0).toFixed(2)}</td>
-                        `;
-                    });
-                    invoiceDetailsModal.show();
-                }
-            } catch (error) { console.error(error); }
-        }
-
-        // B. LÓGICA EDITAR
-        if (btnEdit) {
-            const id = btnEdit.getAttribute('data-id');
-            try {
-                const invoice = await callApi(`/facturas/obtener/${id}`);
-                const clientes = await callApi('/clientes/listar');
-                const clienteSelect = document.getElementById('cliente-id');
-
-                document.getElementById('edit-invoice-id').value = id;
-                document.querySelector('#createInvoiceModalLabel').textContent = `Editando Factura`;
-
-                clienteSelect.innerHTML = '<option value="">Seleccione un cliente</option>';
-                clientes.forEach(c => {
-                    const isSelected = c.ClienteID === invoice.ClienteID ? 'selected' : '';
-                    clienteSelect.innerHTML += `<option value="${c.ClienteID}" ${isSelected}>${c.RazonSocial}</option>`;
-                });
-                
-                productItemsContainer.innerHTML = '';
-                if (availableProducts.length === 0) availableProducts = await callApi('/productos/listar');
-
-                invoice.Detalles.forEach(detalle => {
-                    const newRow = document.createElement('div');
-                    newRow.classList.add('row', 'mb-2', 'product-item');
-                    newRow.innerHTML = `
-                        <div class="col-md-6">
-                            <select class="form-select product-id" required>
-                                ${availableProducts.map(p => `
-                                    <option value="${p.ProductoID}" ${p.ProductoID === detalle.ProductoID ? 'selected' : ''}>
-                                        ${p.Nombre} ($${p.PrecioUnitario.toFixed(2)})
-                                    </option>`).join('')}
-                            </select>
-                        </div>
-                        <div class="col-md-4">
-                            <input type="number" class="form-control quantity" value="${detalle.Cantidad}" min="1" required>
-                        </div>
-                        <div class="col-md-2 d-flex align-items-center">
-                            <button type="button" class="btn btn-danger btn-sm remove-product-row">&times;</button>
-                        </div>`;
-                    productItemsContainer.appendChild(newRow);
-                });
-                createInvoiceModal.show();
-            } catch (error) { console.error(error); }
-        }
-
-        // C. LÓGICA ANULAR
-        if (btnCancel) {
-            const id = btnCancel.getAttribute('data-id');
-            const result = await Swal.fire({
-                title: '¿Anular Factura?',
-                text: `¿Está seguro de que desea anular la factura #${id}?`,
-                icon: 'warning',
-                showCancelButton: true,
-                confirmButtonColor: '#d33',
-                confirmButtonText: 'Sí, anular'
-            });
-
-            if (result.isConfirmed) {
-                try {
-                    await callApi(`/facturas/anular/${id}`, 'DELETE');
-                    Swal.fire('Anulada', 'Factura anulada con éxito.', 'success');
-                    loadInvoices();
-                } catch (error) { }
-            }
-        }
+            loadInvoices();
+        } catch (error) { }
     });
 
+    // --- 4. Clients Logic (CRUD) ---
 
     document.getElementById('btn-nuevo-cliente').addEventListener('click', () => {
         clientForm.reset();
