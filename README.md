@@ -9,7 +9,7 @@ Interfaz dinámica y responsiva para la gestión de facturas.
 
 ## 🔑 Credenciales de Acceso
 - **Usuario:** admin
-- **Password:** 1234
+- **Password:** MiPasswordSeguro123
 (O las que hayas definido en tu tabla de Usuarios).
 
 ## ✨ Características
